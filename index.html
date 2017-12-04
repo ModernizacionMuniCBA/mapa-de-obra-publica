@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Obras Activas</title>
+    <link href="css/bootstrap.css" rel="stylesheet">
+    <style type="text/css">
+      body {
+        background-color: #b6c9ca;
+        margin-left: 30px;
+        margin-top: 10px;
+      }
+      .form-control {
+        color: #FFFFFF;
+        border-radius: 0 4px 4px 0;
+        background-color: #428bca;
+        border-color: #357ebd;
+        display: inline-block;
+        font-size: 16px;
+        width: unset;
+      }
+      .form-control[disabled], .form-control[readonly], fieldset[disabled] .form-control {
+          color: #afafaf;
+          background-color: #4a7fad;
+      }
+      #chart { margin-top: 10px; }
+      circle {
+        opacity: .8;
+        stroke: white;
+        stroke-width: 2px;
+      }
+      .btn-group {
+        z-index: 20;
+      }
+      .label {
+        fill: black;
+        font-size: 16px;
+      }
+      .barra-progreso {
+        color:#000;
+        background-color:#f1f1f1;
+        border-radius: 4px;
+      }
+      .progreso {
+        color: #272727;
+        background-color: #2196F3;
+        border-radius: 4px;
+        font-weight: 600;
+        line-height: 24px;
+        height:24px;
+        padding-left: 10px;
+      }
+    </style>
+    
+  </head>
+  <body>
+    <!-- Opciones de selección de orden de los datos -->
+    <!-- Dato original: 
+    Dato original
+https://gobiernoabierto.cordoba.gob.ar/data/datos-abiertos/categoria/economia/morosos-de-la-contribucion-que-incide-sobre-los-rodados
+    Recurso: 
+    https://gobiernoabierto.cordoba.gob.ar/media/datos/Morosos_Automotores_al_01-08-2016.csv
+    -->
+    <p>El color representa el tipo de obra, el tamaño de la burbuja es proporcional al monto de inverión.<br/>Puede reordenar las burbujas con las siguientes opciones: </p>
+    <div class="row">
+      <div class="col-md-12 text-center">
+        <div class="btn-group" data-toggle="buttons">
+          <label class="btn btn-primary active" id="tipo"><input type="radio" name="options"> Tipo de obra</label>
+          <label class="btn btn-primary" id="rango_monto"><input type="radio" name="options"> Rango de Inversión</label>
+          <label class="btn btn-primary" id="rango_realizado"><input type="radio" name="options"> Realización</label>
+          <select disabled class="form-control" name="barrios">
+            <option value="0">Seleccione un barrio</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="chart"></div>
+    <script src="lib/d3.js"></script>
+    <script src="lib/jquery.js"></script>
+    <script src="lib/bootstrap.js"></script>
+    <script src="lib/underscore.js"></script>
+
+    
+    <script>
+      let todasObras = [], obras = [], force, svg, nodes, maxRadius, padding, fill;
+      let width = window.innerWidth-100, height = 500;
+
+      function iniciar () {
+        const factor = obras.length <= 2 ? 0.2 :
+                       obras.length < 5 ? 0.3 :
+                       obras.length <= 10 ? 0.6 :
+                       1.2;
+        width = window.innerWidth-100, height = 600*factor;
+
+        svg.attr("width", width)
+           .attr("height", height);
+
+        nodes = svg.selectAll("circle")
+          .data(obras);
+
+        nodes.enter().append("circle")
+          .attr("class", "node")
+          .attr("cx", d => d.x)
+          .attr("cy", d => d.y)
+          .attr("r", 2)
+          .style("fill", d => fill(d.properties.tipo_id)) // el color es por el campo tipo
+          .on("mouseover", function (d) { showPopover.call(this, d) })
+          .on("mouseout", d => removePopovers());
+
+        nodes.transition().duration(2000)
+          .attr("r", d => d.radius);
+
+        nodes.exit().remove();
+
+      }
+
+      function draw (varname) {
+        const centers = getCenters(varname, [width, height]);
+        force.on("tick", tick(centers, varname));
+        labels(centers);
+        $('select').removeAttr('disabled');
+        force.start();
+      }
+
+      const getCenters = (vname, size) => {
+        let centers, map;
+        centers = _.uniq(_.pluck(_.pluck(obras, 'properties'), vname)).map(function (d) {
+          return {name: d, value: 1};
+        });
+
+        map = d3.layout.pack().size(size);
+        map.nodes({children: centers});
+        return centers;
+      };
+
+      function tick (centers, varname) {
+        let foci = {};
+        for (let i = 0; i < centers.length; i++) {
+          foci[centers[i].name] = centers[i];
+        }
+        return e => {
+          for (let i = 0; i < obras.length; i++) {
+            const o = obras[i];
+            const f = foci[o.properties[varname]];
+            o.y += (f.y - o.y) * e.alpha;
+            o.x += (f.x - o.x) * e.alpha;
+          }
+          nodes.each(collide(.11))
+            .attr("cx", d => d.x )
+            .attr("cy", d => d.y );
+        }
+      }
+
+      function labels (centers) {
+        svg.selectAll(".label").remove();
+
+        svg.selectAll(".label")
+          .data(centers).enter().append("text")
+          .attr("class", "label")
+          .text(d => d.name )
+          .attr("transform", d => {
+            const factor = d.name.length > 25 ? 6 : 2;
+            return "translate(" + (d.x - ((d.name.length)*factor)) + ", " + (d.y - (d.r*0.8)) + ")";
+          });
+      }
+
+      function removePopovers () {
+        $('.popover').each(function() {
+          $(this).remove();
+        }); 
+      }
+
+      function showPopover (d) {
+        $(this).popover({
+          placement: 'auto top',
+          container: 'body',
+          trigger: 'manual',
+          html : true,
+          content: () => {
+            const obra = d.properties;
+            const color = obra.porcentaje_completado === "100.00" ? ";background-color:#00a665!important" : "";
+
+            const barra = `<div class="barra-progreso">
+                            <div class="progreso" style="width:${obra.porcentaje_completado}%${color}">${obra.porcentaje_completado}%</div>
+                          </div>`;
+            return `<strong>${obra.nombre}</strong><br/>${obra.monto === "0.00" ? "" : "<strong style='color:green'>Inversión: $ " + parseFloat(obra.monto).toLocaleString() + "</strong>"}${barra}Tipo: ${obra.tipo}<br/>Contratista: ${obra.organizacion}${obra.CUIT === "Sin datos" ? "" : " ("+obra.CUIT+")"}`
+          }
+        });
+        $(this).popover('show');
+      }
+
+      function collide(alpha) {
+        const quadtree = d3.geom.quadtree(obras);
+        return d => {
+          let r = d.radius + maxRadius + padding,
+              nx1 = d.x - r,
+              nx2 = d.x + r,
+              ny1 = d.y - r,
+              ny2 = d.y + r;
+          quadtree.visit((quad, x1, y1, x2, y2) => {
+            if (quad.point && (quad.point !== d)) {
+              let x = d.x - quad.point.x,
+                  y = d.y - quad.point.y,
+                  l = Math.sqrt(x * x + y * y),
+                  r = d.radius + quad.point.radius + padding;
+              if (l < r) {
+                l = (l - r) / l * alpha;
+                d.x -= x *= l;
+                d.y -= y *= l;
+                quad.point.x += x;
+                quad.point.y += y;
+              }
+            }
+            return x1 > nx2 || x2 < nx1 || y1 > ny2 || y2 < ny1;
+          });
+        };
+      }
+      $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/barrios-obras-publicas/?page_size=180', data => {
+        const barrios = data.results;
+        const options = barrios.map(barrio => `<option value="${barrio.id}">${barrio.nombre}</option>`);
+        $('select').append(options);
+        $('select').change(function(e) {
+          const $this = $(this);
+          const seleccionado = $this.find('option:selected').val();
+
+          if (seleccionado !== "0") {
+            obras = _.filter(todasObras, obj => {
+              return obj.properties.barrios.find(barrio => barrio.id == seleccionado);
+            })
+          } else {
+            obras = todasObras.slice();
+          }
+          console.log(obras);
+          iniciar();
+          draw($('.active').attr('id'));
+        });
+      });
+
+      $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/tipos-obras-publicas/?page_size=25', dataTipos => {
+        const tiposObras = dataTipos.results;
+        const colores = dataTipos.results.map(tipo => "#"+tipo.color);
+        fill = d3.scale.ordinal().range(colores);
+        svg = d3.select("#chart")
+                .append("svg");
+
+        $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/obras-publicas/?page_size=300', data => {
+          todasObras = data.results.features;
+          obras = todasObras.slice();
+          maxRadius = 0;
+          for (let j = 0; j < obras.length; j++) {
+            // el tamaño de la burbuja esta relacionado al campo monto
+            let radius = parseInt(obras[j].properties.monto) / 4e6;
+            if(radius <= 2) {
+              obras[j].radius = 4;
+            } else if (radius >= 30) {
+              obras[j].radius = 30;
+            } else {
+              obras[j].radius = radius;
+            }
+            obras[j].x = Math.random() * (width-30);
+            obras[j].y = Math.random() * (height-30);
+            maxRadius = obras[j].radius > maxRadius ? obras[j].radius : maxRadius;
+            
+            const monto = obras[j].properties.monto;
+            obras[j].properties.rango_monto =  monto >= 1e8 ? "Mayor a $ 100 millones" :
+                                    monto >= 1e7 ? "Entre $ 10 y $ 100 millones" :
+                                    monto >= 1e6 ? "Entre $ 1 y $ 10 millones" :
+                                    "Menor a $ 1 millón";
+
+            const porcentajeCompletado = obras[j].properties.porcentaje_completado*1;
+            obras[j].properties.rango_realizado = porcentajeCompletado === 100 ? "Finalizadas" :
+                                                  porcentajeCompletado >= 50 ? "Avanzadas" :
+                                                  porcentajeCompletado > 0 ? "Iniciadas" :
+                                                  "Licitadas";
+          }
+          padding = 4;
+          iniciar();
+          force = d3.layout.force();
+
+          draw('tipo');
+
+          $(".btn").click(function() {
+            draw(this.id);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
