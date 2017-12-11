@@ -8,7 +8,6 @@
     <style type="text/css">
       body {
         background-color: #b6c9ca;
-        margin-left: 30px;
         margin-top: 10px;
       }
       .form-control {
@@ -51,19 +50,20 @@
         height:24px;
         padding-left: 10px;
       }
+      #mapa {
+        height: 60vh;
+        width: 100%;
+        margin: 0px;
+        padding: 0px;
+      }
     </style>
     
   </head>
   <body>
-    <!-- Opciones de selección de orden de los datos -->
-    <!-- Dato original: 
-    Dato original
-https://gobiernoabierto.cordoba.gob.ar/data/datos-abiertos/categoria/economia/morosos-de-la-contribucion-que-incide-sobre-los-rodados
-    Recurso: 
-    https://gobiernoabierto.cordoba.gob.ar/media/datos/Morosos_Automotores_al_01-08-2016.csv
-    -->
-    <p>El color representa el tipo de obra, el tamaño de la burbuja es proporcional al monto de inverión.<br/>Puede reordenar las burbujas con las siguientes opciones: </p>
     <div class="row">
+      <div class="col-md-12">
+        <p>El color representa el tipo de obra, el tamaño de la burbuja es proporcional al monto de inverión.<br/>Puede reordenar las burbujas con las siguientes opciones: </p>
+      </div>
       <div class="col-md-12 text-center">
         <div class="btn-group" data-toggle="buttons">
           <label class="btn btn-primary active" id="tipo"><input type="radio" name="options"> Tipo de obra</label>
@@ -76,15 +76,61 @@ https://gobiernoabierto.cordoba.gob.ar/data/datos-abiertos/categoria/economia/mo
       </div>
     </div>
     <div id="chart"></div>
+    <div class="row">
+      <div class="col-md-12">
+        <div id="mapa"></div>
+      </div>
+    </div>
     <script src="lib/d3.js"></script>
     <script src="lib/jquery.js"></script>
     <script src="lib/bootstrap.js"></script>
     <script src="lib/underscore.js"></script>
-
-    
     <script>
-      let todasObras = [], obras = [], force, svg, nodes, maxRadius, padding, fill;
+      let todasObras = [], tiposObras, obras = [], tipos = {}, force, svg, nodes, maxRadius, padding, fill;
       let width = window.innerWidth-100, height = 500;
+      let map = null;
+      var initMap = function() {
+        let infowindow = new google.maps.InfoWindow();
+          map = new google.maps.Map(
+          document.getElementById("mapa"), {
+            center: new google.maps.LatLng(-31.420116, -64.1910517),
+            zoom: 12,
+            mapTypeId: google.maps.MapTypeId.ROADMAP,
+            styles: [
+              {
+                featureType: "poi",
+                elementType: "labels",
+                stylers: [
+                  { visibility: "off" }
+                ]
+              }
+            ]
+          });
+          map.data.setStyle(feature => {
+            const SD_NAME = feature.getProperty('SD_NAME');
+            return {
+              strokeColor: tipos[feature.getProperty('tipo')]
+            }
+          });
+          map.data.addListener('click', function(event) {
+            let html = "";
+            const nombre = event.feature.getProperty("nombre");
+            const progreso = event.feature.getProperty("porcentaje_completado");
+            let htmlProgreso = ""
+            switch(progreso) {
+              case '100.00': htmlProgreso = "<p style='font-weight:500;margin-bottom:0'>Finalizado: " + progreso + " %</p>"; break;
+              case '0.00': htmlProgreso = "<p style='font-weight:500;margin-bottom:0'>Por iniciar</p>"; break;
+              default: htmlProgreso = "<p style='font-weight:500;margin-bottom:0'>En progreso: " + progreso + " %</p>"; break;
+            }
+            html = '<strong style="color:#00a665 !important">'+nombre+'</strong>';
+            html += htmlProgreso;
+            html += event.feature.getProperty("monto") != 0 ? "<p style='font-size:12px;margin-bottom:0'>Inversión:</p> <p style='font-weight:500;margin-bottom:0'>$ " + parseFloat(event.feature.getProperty("monto")).toLocaleString()+"</p>" : "";
+            html += "<div style='vertical-align:middle;display:inline-block;width:calc(100% - 30px)'><p style='font-size:12px;margin-bottom:0'>Tipo:</p><p style='font-weight:500;margin-bottom:0'>" + event.feature.getProperty("tipo")+"</p></div><div style='display:inline-block;width:30px;vertical-align:middle;text-align:right'><img style='width:100%' alt='"+event.feature.getProperty("tipo")+"' src='https://www.cordoba.gob.ar/wp-content/uploads/2017/11/"+event.feature.getProperty("tipo_id")+".png' /></div>";
+            infowindow.setContent("<div style='width:200px;font-size:16px'>"+html+"</div>");
+            infowindow.setPosition(event.latLng);
+            infowindow.open(map);
+        });
+      }
 
       function iniciar () {
         const factor = obras.length <= 2 ? 0.2 :
@@ -238,14 +284,18 @@ https://gobiernoabierto.cordoba.gob.ar/data/datos-abiertos/categoria/economia/mo
       });
 
       $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/tipos-obras-publicas/?page_size=25', dataTipos => {
-        const tiposObras = dataTipos.results;
-        const colores = dataTipos.results.map(tipo => "#"+tipo.color);
+        tiposObras = dataTipos.results;
+        const colores = dataTipos.results.map(tipo=>{
+          tipos[tipo.nombre] = "#"+tipo.color.substr(2,7);
+          return "#"+tipo.color;
+        });
         fill = d3.scale.ordinal().range(colores);
         svg = d3.select("#chart")
                 .append("svg");
 
-        $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/obras-publicas/?page_size=300', data => {
+        $.get('https://gobiernoabierto.cordoba.gob.ar/api/v2/obras-publicas/obras-publicas/?page_size=250', data => {
           todasObras = data.results.features;
+          map.data.addGeoJson(data.results);
           obras = todasObras.slice();
           maxRadius = 0;
           for (let j = 0; j < obras.length; j++) {
@@ -286,5 +336,6 @@ https://gobiernoabierto.cordoba.gob.ar/data/datos-abiertos/categoria/economia/mo
         });
       });
     </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDhFsFdUG-xV-ZJjMyudfbBue7qnsA-odM&callback=initMap"></script>
   </body>
 </html>
